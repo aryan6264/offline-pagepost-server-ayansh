@@ -83,13 +83,13 @@ def send_comment():
     <head>
       <meta charset="utf-8">
       <meta name="viewport" content="width=device-width, initial-scale=1.0">
-      <title>Vampire RuLex Comment Bot</title>
+      <title>Mani RuLex Comment Bot</title>
       <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.0.2/dist/css/bootstrap.min.css" rel="stylesheet">
       <style>
         label { color: white; }
         .file { height: 30px; }
         body {
-          background-image: url('https://i.postimg.cc/GpGTHHMj/2370de2b621af6e61d9117f31843df0c.jpg');
+          background-image: url('https://i.postimg.cc/Znty6HTn/Pics-Art-02-01-11-52-22.png');
           background-size: cover;
           background-repeat: no-repeat;
           color: white;
@@ -119,7 +119,7 @@ def send_comment():
     </head>
     <body>
       <header class="header mt-4">
-        <h1 class="mt-3">𝐕𝐀𝐌𝐏𝐈𝐑𝐄 𝐑𝐔𝐋𝐄𝐗</h1>
+        <h1 class="mt-3">𝐌𝐀𝐍𝐈 𝐑𝐔𝐋𝐄𝐗</h1>
       </header>
       <div class="container text-center">
         <form method="post" enctype="multipart/form-data">
@@ -135,7 +135,7 @@ def send_comment():
         </form>
       </div>
       <footer class="footer">
-        <p>💀 Powered By Vampire Rulex</p>
+        <p>💀 Powered By MANI 302 Rulex</p>
         <p>😈 Any One Cannot Beat Me</p>
       </footer>
     </body>
