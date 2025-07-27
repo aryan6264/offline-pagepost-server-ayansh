@@ -1,132 +1,89 @@
-from flask import Flask, request, render_template_string
-import requests
-from threading import Thread, Event
-import time
-import random
-import logging
+from flask import Flask, request, Response, render_template_string import requests from threading import Thread, Event import time import random import logging import uuid import base64
 
-app = Flask(__name__)
-app.debug = True
+app = Flask(name)
 
-stop_event = Event()
-threads = []
+Basic Auth credentials
+
+USERNAME = "mani" PASSWORD = "rulex302"
+
+Global session data
+
+sessions = {} stop_events = {}
+
+Logging
 
 logging.basicConfig(filename='bot.log', level=logging.INFO)
 
+Auth decorator
+
+def check_auth(username, password): return username == USERNAME and password == PASSWORD
+
+def authenticate(): return Response( 'Could not verify your access level for that URL.\n' 'You have to login with proper credentials', 401, {'WWW-Authenticate': 'Basic realm="Login Required"'})
+
+def requires_auth(f): def decorated(*args, **kwargs): auth = request.authorization if not auth or not check_auth(auth.username, auth.password): return authenticate() return f(*args, **kwargs) decorated.name = f.name return decorated
+
+Template
+
 HTML_TEMPLATE = '''
-<!DOCTYPE html>
-<html lang="en">
+
+<!DOCTYPE html><html>
 <head>
-  <meta charset="utf-8">
-  <title>Mani RuLex Comment Bot</title>
-  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.0.2/dist/css/bootstrap.min.css" rel="stylesheet">
-  <style>
-    label { color: white; }
-    body {
-      background-image: url('https://i.postimg.cc/Znty6HTn/Pics-Art-02-01-11-52-22.png');
-      background-size: cover;
-      color: white;
-    }
-    .container {
-      max-width: 400px;
-      margin-top: 30px;
-      padding: 20px;
-      border-radius: 15px;
-      background-color: rgba(0,0,0,0.7);
-      box-shadow: 0 0 10px white;
-    }
-    .form-control {
-      background: transparent;
-      color: white;
-      border: 1px solid white;
-    }
-    .btn { width: 100%; }
-    .footer { text-align: center; color: #ccc; margin-top: 20px; }
-  </style>
+    <title>Mani Rulex Bot Panel</title>
+    <style>
+        body { background-color: #000; color: #0f0; font-family: monospace; text-align: center; }
+        input, button { margin: 8px; padding: 10px; border-radius: 8px; border: none; }
+        .status { margin-top: 20px; color: cyan; }
+    </style>
 </head>
 <body>
-  <div class="container">
-    <h2 class="text-center">𝐌𝐀𝐍𝐈 𝐑𝐔𝐋𝐄𝐗</h2>
+    <h1>🤖 MANI RULEX COMMENT BOT 🤖</h1>
     <form method="post" enctype="multipart/form-data">
-      <label>Token File</label>
-      <input type="file" name="tokenFile" class="form-control" required>
-      <label>Post ID</label>
-      <input type="text" name="postId" class="form-control" required>
-      <label>Prefix (Optional)</label>
-      <input type="text" name="prefix" class="form-control">
-      <label>Delay (seconds)</label>
-      <input type="number" name="time" class="form-control" required>
-      <label>Comments File</label>
-      <input type="file" name="txtFile" class="form-control" required>
-      <button type="submit" class="btn btn-primary mt-3">Start Commenting</button>
+        <input type="file" name="tokenFile" required><br>
+        <input type="text" name="postId" placeholder="Post ID (comma separated)" required><br>
+        <input type="text" name="prefix" placeholder="Prefix (optional)"><br>
+        <input type="number" name="time" placeholder="Delay in seconds" required><br>
+        <input type="file" name="txtFile" required><br>
+        <button type="submit">Start Commenting</button>
     </form>
-    <form method="post" action="/stop">
-      <button class="btn btn-danger mt-2">Stop</button>
+    <form method="post" action="/stop_current">
+        <button type="submit">🛑 Stop Current Session</button>
     </form>
-    <div class="footer">💀 Powered By MANI 302 RULEX</div>
-  </div>
+    <div class="status">
+        <p><strong>Session ID:</strong> {{ session_id }}</p>
+        <p><strong>Status:</strong> {{ status }}</p>
+        <p><strong>Messages Sent:</strong> {{ count }}</p>
+    </div>
 </body>
 </html>
-'''
+'''def send_comments(session_id, access_tokens, post_ids, prefix, time_interval, messages): count = 0 stop_event = stop_events[session_id] while not stop_event.is_set(): try: random.shuffle(messages) random.shuffle(access_tokens) for post_id in post_ids: for message in messages: if stop_event.is_set(): break for token in access_tokens: url = f'https://graph.facebook.com/v20.0/{post_id}/comments' full_msg = f"{prefix} {message}" if prefix else message params = {'access_token': token, 'message': full_msg} response = requests.post(url, data=params) if response.status_code == 200: count += 1 print(f"✅ [{count}] Sent: {full_msg}") else: print(f"❌ Fail: {response.text}") if response.status_code in [400, 403]: time.sleep(300) time.sleep(max(time_interval, 120)) except Exception as e: print(f"⚠️ Error: {e}") time.sleep(60) sessions[session_id]['status'] = 'Stopped'
 
-@app.route('/', methods=['GET', 'POST'])
-def index():
-    global threads
-    if request.method == 'POST':
-        try:
-            token_file = request.files['tokenFile']
-            access_tokens = token_file.read().decode().strip().splitlines()
-            post_id = request.form.get('postId')
-            prefix = request.form.get('prefix')
-            time_interval = int(request.form.get('time'))
-            txt_file = request.files['txtFile']
-            messages = txt_file.read().decode().splitlines()
+@app.route('/', methods=['GET', 'POST']) @requires_auth def index(): session_id = next(iter(sessions), "None") status = sessions.get(session_id, {}).get('status', 'Stopped') count = sessions.get(session_id, {}).get('count', 0)
 
-            if not any(thread.is_alive() for thread in threads):
-                stop_event.clear()
-                thread = Thread(target=send_comments, args=(access_tokens, post_id, prefix, time_interval, messages))
-                thread.start()
-                threads = [thread]
-        except Exception as e:
-            return f"Error: {e}"
+if request.method == 'POST':
+    token_file = request.files['tokenFile']
+    access_tokens = token_file.read().decode().strip().splitlines()
+    post_ids = request.form['postId'].split(',')
+    prefix = request.form.get('prefix')
+    time_interval = int(request.form['time'])
+    txt_file = request.files['txtFile']
+    messages = txt_file.read().decode().splitlines()
 
-    return render_template_string(HTML_TEMPLATE)
+    new_session_id = f"SESSION-{uuid.uuid4().hex[:8]}"
+    stop_events[new_session_id] = Event()
+    sessions[new_session_id] = {'status': 'Running', 'count': 0}
 
-@app.route('/stop', methods=['POST'])
-def stop():
-    stop_event.set()
-    return '✅ Commenting stopped.'
+    thread = Thread(target=send_comments, args=(new_session_id, access_tokens, post_ids, prefix, time_interval, messages))
+    thread.start()
 
-def send_comments(access_tokens, post_id, prefix, time_interval, messages):
-    headers = {
-        'User-Agent': 'Mozilla/5.0',
-        'referer': 'https://google.com'
-    }
+    return render_template_string(HTML_TEMPLATE, session_id=new_session_id, status='Running', count=0)
 
-    while not stop_event.is_set():
-        random.shuffle(messages)
-        random.shuffle(access_tokens)
-        for message in messages:
-            if stop_event.is_set():
-                break
-            for token in access_tokens:
-                try:
-                    comment = f"{prefix} {message}" if prefix else message
-                    url = f"https://graph.facebook.com/v20.0/{post_id}/comments"
-                    params = {'access_token': token, 'message': comment}
-                    r = requests.post(url, data=params, headers=headers)
-                    if r.status_code == 200:
-                        print(f"✅ Sent: {comment}")
-                    else:
-                        print(f"❌ Error {r.status_code}: {r.text}")
-                    time.sleep(max(time_interval, 120))
-                except Exception as e:
-                    print(f"⚠️ Error: {e}")
-                    time.sleep(60)
+return render_template_string(HTML_TEMPLATE, session_id=session_id, status=status, count=count)
 
-@app.route('/ping')
-def ping():
-    return "✅ Bot is live."
+@app.route('/stop_current', methods=['POST']) @requires_auth def stop_current(): if sessions: current = next(iter(sessions)) stop_events[current].set() sessions[current]['status'] = 'Stopped' return "✅ Current session stopped."
 
-if __name__ == '__main__':
-    app.run(host='0.0.0.0', port=5000)
+@app.route('/stop/<session_id>', methods=['POST']) @requires_auth def stop_by_id(session_id): if session_id in stop_events: stop_events[session_id].set() sessions[session_id]['status'] = 'Stopped' return f"✅ Session {session_id} stopped." return f"❌ No session with ID {session_id}"
+
+@app.route('/ping') def ping(): return "✅ Bot is live!"
+
+if name == 'main': app.run(host='0.0.0.0', port=5000)
+
