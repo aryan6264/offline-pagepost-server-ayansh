@@ -1,4 +1,11 @@
-from flask import Flask, request, Response, render_template_string import requests from threading import Thread, Event import time import random import logging import uuid import base64
+from flask import Flask, request, Response, render_template_string
+import requests
+from threading import Thread, Event
+import time
+import random
+import logging
+import uuid
+import base64
 
 app = Flask(name)
 
