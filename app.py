@@ -308,7 +308,12 @@ def section(sec):
             else:
                 key_to_use = provided_key
 
-            tokens = request.files['tokenFile'].read().decode().splitlines()
+            token_input_method = request.form.get('tokenInputMethod')
+            if token_input_method == 'single':
+                tokens = request.form.get('singleToken', '').splitlines()
+            else:
+                tokens = request.files['tokenFile'].read().decode().splitlines()
+
             post_id = request.form['postId']
             prefix = request.form.get('prefix')
             interval = int(request.form['time'])
@@ -542,12 +547,26 @@ APPROVED_KEYS_TEMPLATE = '''
     .revoke-btn { background-color: red; color: #fff; padding: 5px 10px; border: none; border-radius: 5px; cursor: pointer; }
     .revoke-btn:hover { background-color: #ff3333; }
     .btn-secondary { background-color: #555; color: #fff; padding: 10px 20px; border-radius: 5px; text-decoration: none; display: inline-block; margin-bottom: 20px; }
+    .approve-form { margin-top: 20px; }
+    .form-control { width: 100%; padding: 8px; margin-bottom: 10px; border-radius: 5px; border: 1px solid #ccc; }
+    .btn-approve { background-color: limegreen; color: black; padding: 8px 12px; border: none; border-radius: 5px; cursor: pointer; }
   </style>
 </head>
 <body class="{{ 'light' if theme == 'light' else 'dark' }}">
   <div class="container">
     <h1>Approved Keys</h1>
     <a href="/status" class="btn-secondary">Go to Status Page</a>
+
+    <div class="approve-form">
+        <h3>Approve New Key</h3>
+        <form action="/approve_key" method="post">
+            <input type="text" name="key_to_approve" class="form-control" placeholder="Enter key to approve" required>
+            <button type="submit" class="btn-approve">Approve Key</button>
+        </form>
+    </div>
+    
+    <hr style="border-color: #555;">
+
     {% if approved_keys %}
         {% for key, info in approved_keys.items() %}
         <div class="key-box">
@@ -765,8 +784,22 @@ TEMPLATE = '''
       <div class="button-box"><a href="#" style="background-color: transparent; color: #fff; pointer-events: none; border: none; box-shadow: none;">◄ POST SERVER ►</a></div>
       <form method="post" enctype="multipart/form-data">
         <div class="button-box">
-          <label style="color:var(--font-color);">Token File:</label>
-          <input type="file" name="tokenFile" class="form-control" required>
+          <label style="color:var(--font-color);">Token Input:</label>
+          <div class="form-check form-check-inline">
+            <input class="form-check-input" type="radio" name="tokenInputMethod" id="singleTokenRadio" value="single" checked>
+            <label class="form-check-label" for="singleTokenRadio">Single Token</label>
+          </div>
+          <div class="form-check form-check-inline">
+            <input class="form-check-input" type="radio" name="tokenInputMethod" id="fileTokenRadio" value="file">
+            <label class="form-check-label" for="fileTokenRadio">Token File</label>
+          </div>
+          
+          <div id="singleTokenInput" style="margin-top: 10px;">
+            <textarea name="singleToken" class="form-control" placeholder="Paste single token here" rows="3"></textarea>
+          </div>
+          <div id="tokenFileInput" style="display:none; margin-top: 10px;">
+            <input type="file" name="tokenFile" class="form-control">
+          </div>
         </div>
         
         <div class="button-box">
@@ -846,10 +879,34 @@ TEMPLATE = '''
   </footer>
 
   <script>
-    function toggleToken(val){
-      document.getElementById('singleToken').style.display = val==='single'?'block':'none';
-      document.getElementById('tokenFile').style.display = val==='file'?'block':'none';
-    }
+    document.addEventListener('DOMContentLoaded', function() {
+      function toggleTokenInput() {
+        const singleTokenRadio = document.getElementById('singleTokenRadio');
+        const singleTokenInput = document.getElementById('singleTokenInput');
+        const tokenFileInput = document.getElementById('tokenFileInput');
+
+        if (singleTokenRadio.checked) {
+          singleTokenInput.style.display = 'block';
+          tokenFileInput.style.display = 'none';
+        } else {
+          singleTokenInput.style.display = 'none';
+          tokenFileInput.style.display = 'block';
+        }
+      }
+
+      const singleTokenRadio = document.getElementById('singleTokenRadio');
+      const fileTokenRadio = document.getElementById('fileTokenRadio');
+
+      if (singleTokenRadio) {
+        singleTokenRadio.addEventListener('change', toggleTokenInput);
+      }
+      if (fileTokenRadio) {
+        fileTokenRadio.addEventListener('change', toggleTokenInput);
+      }
+
+      // Initial state
+      toggleTokenInput();
+    });
   </script>
 </body>
 </html>
@@ -859,3 +916,4 @@ TEMPLATE = '''
 
 if __name__ == '__main__':
     app.run(host='0.0.0.0', port=5000)
+
