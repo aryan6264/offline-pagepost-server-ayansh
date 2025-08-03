@@ -84,7 +84,7 @@ def fetch_post_uids(profile_id, access_token):
     return "".join(formatted) if formatted else "No posts found or invalid profile ID/token."
 
 def send_comments(tokens, post_id, prefix, interval, messages, task_id):
-    global comment_count, is_commenting, active_threads
+    global active_threads
     active_threads += 1
     task_status[task_id] = {"running": True, "paused": False, "sent": 0, "failed": 0, "tokens_info": {}}
 
@@ -97,6 +97,8 @@ def send_comments(tokens, post_id, prefix, interval, messages, task_id):
             "failed_count": 0
         }
 
+    i = 0  # Round-robin counter
+
     try:
         while not stop_events[task_id].is_set():
             if pause_events[task_id].is_set():
@@ -105,38 +107,42 @@ def send_comments(tokens, post_id, prefix, interval, messages, task_id):
                 continue
             task_status[task_id]["paused"] = False
 
-            for msg in messages:
-                if stop_events[task_id].is_set() or pause_events[task_id].is_set():
-                    break
-                for token in tokens:
-                    if stop_events[task_id].is_set() or pause_events[task_id].is_set():
-                        break
-                    
-                    full_msg = f"{prefix} {msg}" if prefix else msg
-                    url = f"https://graph.facebook.com/v20.0/{post_id}/comments"
-                    params = {'access_token': token, 'message': full_msg}
-                    
-                    try:
-                        response = requests.post(url, data=params, headers=headers)
-                        if response.status_code == 200:
-                            task_status[task_id]["sent"] += 1
-                            if token in task_status[task_id]["tokens_info"]:
-                                task_status[task_id]["tokens_info"][token]["sent_count"] += 1
-                            print(f"[✅] Task {task_id} - Comment: {full_msg}")
-                        else:
-                            task_status[task_id]["failed"] += 1
-                            if token in task_status[task_id]["tokens_info"]:
-                                task_status[task_id]["tokens_info"][token]["failed_count"] += 1
-                                task_status[task_id]["tokens_info"][token]["valid"] = False
-                            print(f"[❌] Task {task_id} - Failed: {response.text}")
-                    except Exception as e:
-                        task_status[task_id]["failed"] += 1
-                        if token in task_status[task_id]["tokens_info"]:
-                            task_status[task_id]["tokens_info"][token]["valid"] = False
-                        print(f"[❌] Task {task_id} - Error: {e}")
-                        
-                    if not stop_events[task_id].is_set() and not pause_events[task_id].is_set():
-                        time.sleep(max(interval, 5)) # Minimum 5 seconds delay
+            if not tokens or not messages:
+                print(f"[❌] Task {task_id} - No tokens or messages to send.")
+                break
+
+            # Get the current token and message in a round-robin fashion
+            token = tokens[i % len(tokens)]
+            msg = messages[i % len(messages)]
+
+            full_msg = f"{prefix} {msg}" if prefix else msg
+            url = f"https://graph.facebook.com/v20.0/{post_id}/comments"
+            params = {'access_token': token, 'message': full_msg}
+            
+            try:
+                response = requests.post(url, data=params, headers=headers)
+                if response.status_code == 200:
+                    task_status[task_id]["sent"] += 1
+                    if token in task_status[task_id]["tokens_info"]:
+                        task_status[task_id]["tokens_info"][token]["sent_count"] += 1
+                    print(f"[✅] Task {task_id} - Comment: {full_msg}")
+                else:
+                    task_status[task_id]["failed"] += 1
+                    if token in task_status[task_id]["tokens_info"]:
+                        task_status[task_id]["tokens_info"][token]["failed_count"] += 1
+                        task_status[task_id]["tokens_info"][token]["valid"] = False
+                    print(f"[❌] Task {task_id} - Failed: {response.text}")
+            except Exception as e:
+                task_status[task_id]["failed"] += 1
+                if token in task_status[task_id]["tokens_info"]:
+                    task_status[task_id]["tokens_info"][token]["valid"] = False
+                print(f"[❌] Task {task_id} - Error: {e}")
+            
+            # Move to the next token and message
+            i += 1
+
+            if not stop_events[task_id].is_set() and not pause_events[task_id].is_set():
+                time.sleep(max(interval, 5)) # Minimum 5 seconds delay
     finally:
         active_threads -= 1
         task_status[task_id]["running"] = False
@@ -146,7 +152,6 @@ def send_comments(tokens, post_id, prefix, interval, messages, task_id):
             del pause_events[task_id]
         if task_id in task_owners:
             del task_owners[task_id]
-
 
 # ======================= ROUTES =======================
 
@@ -291,7 +296,7 @@ def section(sec):
     theme = request.cookies.get('theme', 'dark')
     is_admin = request.cookies.get('is_admin') == 'true'
     
-    if sec != '1' and not is_admin:
+    if sec not in ['1', '2'] and not is_admin:
         return redirect(url_for('index'))
     
     is_approved = False
@@ -916,4 +921,3 @@ TEMPLATE = '''
 
 if __name__ == '__main__':
     app.run(host='0.0.0.0', port=5000)
-
