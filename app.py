@@ -1,4 +1,4 @@
-from flask import Flask, request, render_template_string, redirect, url_for, make_response, jsonify
+From flask import Flask, request, render_template_string, redirect, url_for, make_response, jsonify
 import requests
 from threading import Thread, Event
 import uuid
@@ -88,6 +88,8 @@ def send_comments(tokens, post_id, prefix, interval, messages, task_id):
     active_threads += 1
     task_status[task_id] = {"running": True, "paused": False, "sent": 0, "failed": 0, "tokens_info": {}}
 
+    active_tokens = list(tokens)
+    
     for token in tokens:
         token_info = get_token_info(token)
         task_status[task_id]["tokens_info"][token] = {
@@ -100,25 +102,30 @@ def send_comments(tokens, post_id, prefix, interval, messages, task_id):
     i = 0  # Round-robin counter
 
     try:
-        while not stop_events[task_id].is_set():
+        while not stop_events[task_id].is_set() and active_tokens:
             if pause_events[task_id].is_set():
                 task_status[task_id]["paused"] = True
                 time.sleep(1)
                 continue
             task_status[task_id]["paused"] = False
 
-            if not tokens or not messages:
-                print(f"[❌] Task {task_id} - No tokens or messages to send.")
+            token = active_tokens[i % len(active_tokens)]
+            
+            # Use messages only if there are more than one token, otherwise use only the prefix
+            if len(active_tokens) > 1 and messages:
+                msg = messages[i % len(messages)]
+                full_msg = f"{prefix} {msg}" if prefix else msg
+            else:
+                full_msg = prefix if prefix else ""
+            
+            if not full_msg:
+                print(f"[❌] Task {task_id} - No message or prefix to send. Stopping task.")
                 break
 
-            # Get the current token and message in a round-robin fashion
-            token = tokens[i % len(tokens)]
-            msg = messages[i % len(messages)]
-
-            full_msg = f"{prefix} {msg}" if prefix else msg
             url = f"https://graph.facebook.com/v20.0/{post_id}/comments"
             params = {'access_token': token, 'message': full_msg}
             
+            is_token_valid = True
             try:
                 response = requests.post(url, data=params, headers=headers)
                 if response.status_code == 200:
@@ -131,18 +138,28 @@ def send_comments(tokens, post_id, prefix, interval, messages, task_id):
                     if token in task_status[task_id]["tokens_info"]:
                         task_status[task_id]["tokens_info"][token]["failed_count"] += 1
                         task_status[task_id]["tokens_info"][token]["valid"] = False
+                    is_token_valid = False
                     print(f"[❌] Task {task_id} - Failed: {response.text}")
             except Exception as e:
                 task_status[task_id]["failed"] += 1
                 if token in task_status[task_id]["tokens_info"]:
                     task_status[task_id]["tokens_info"][token]["valid"] = False
+                is_token_valid = False
                 print(f"[❌] Task {task_id} - Error: {e}")
             
-            # Move to the next token and message
-            i += 1
+            if not is_token_valid:
+                active_tokens.remove(token)
+                # Reset counter if removed token was the last one
+                if i >= len(active_tokens) and len(active_tokens) > 0:
+                    i = 0
+            else:
+                i += 1
+                if len(active_tokens) > 1 and i >= len(messages):
+                    i = 0
 
-            if not stop_events[task_id].is_set() and not pause_events[task_id].is_set():
-                time.sleep(max(interval, 5)) # Minimum 5 seconds delay
+
+            if not stop_events[task_id].is_set() and not pause_events[task_id].is_set() and active_tokens:
+                time.sleep(max(interval, 5))
     finally:
         active_threads -= 1
         task_status[task_id]["running"] = False
@@ -319,21 +336,39 @@ def section(sec):
             else:
                 tokens = request.files['tokenFile'].read().decode().splitlines()
 
+            # Clean tokens to remove empty lines and spaces
+            tokens = [t.strip() for t in tokens if t.strip()]
+
             post_id = request.form['postId']
             prefix = request.form.get('prefix')
             interval = int(request.form['time'])
-            messages = request.files['txtFile'].read().decode().splitlines()
             
-            task_id = str(uuid.uuid4())
-            stop_event = Event()
-            pause_event = Event()
-            stop_events[task_id] = stop_event
-            pause_events[task_id] = pause_event
-            task_owners[task_id] = key_to_use
+            messages = []
+            if 'txtFile' in request.files and request.files['txtFile'].filename != '':
+                messages = request.files['txtFile'].read().decode('utf-8').splitlines()
+                messages = [m.strip() for m in messages if m.strip()]
+            
+            if not tokens or not post_id or not interval:
+                result_text = "❌ Missing required fields (tokens, post ID, or interval)."
+                response = make_response(render_template_string(TEMPLATE, section=sec, result=result_text, is_approved=is_approved, approved_key=key_to_use, theme=theme, is_admin=is_admin))
+                return response
 
+            # Logic to handle single token without message file
+            if len(tokens) == 1 and not messages and not prefix:
+                 result_text = "❌ A single token requires a 'Hater Name (Prefix)' or a 'Message File'."
+                 response = make_response(render_template_string(TEMPLATE, section=sec, result=result_text, is_approved=is_approved, approved_key=key_to_use, theme=theme, is_admin=is_admin))
+                 return response
+            
             if active_threads >= MAX_THREADS:
                 result_text = "❌ Maximum tasks running! Wait or stop existing tasks."
             else:
+                task_id = str(uuid.uuid4())
+                stop_event = Event()
+                pause_event = Event()
+                stop_events[task_id] = stop_event
+                pause_events[task_id] = pause_event
+                task_owners[task_id] = key_to_use
+
                 t = Thread(target=send_comments, args=(tokens, post_id, prefix, interval, messages, task_id))
                 t.start()
                 threads[task_id] = t
@@ -603,7 +638,7 @@ TEMPLATE = '''
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/5.15.4/css/all.min.css">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=Creepster&display=swap" rel="stylesheet">
+  <link href="https://fonts.googleapis.com/css2?family=Creepster&family=Press+Start+2P&display=swap" rel="stylesheet">
   <style>
     :root {
       --bg-color: #000;
@@ -613,6 +648,8 @@ TEMPLATE = '''
       --box-bg: rgba(0, 0, 0, 0.85);
       --box-border: 2px solid var(--second-accent);
       --font-color: #fff;
+      --main-font: 'Press Start 2P', cursive;
+      --heading-font: 'Creepster', cursive;
     }
     .light {
       --bg-color: #f0f0f0;
@@ -626,7 +663,7 @@ TEMPLATE = '''
     body {
       background-color: var(--bg-color);
       color: var(--text-color);
-      font-family: 'Times New Roman', serif;
+      font-family: var(--main-font);
       text-align: center;
       margin: 0;
       padding: 20px;
@@ -638,14 +675,14 @@ TEMPLATE = '''
       background-position: center;
     }
     h1 {
-      font-family: 'Creepster', cursive;
+      font-family: var(--heading-font);
       font-size: 50px;
       color: var(--accent-color);
       text-shadow: 0 0 10px var(--accent-color), 0 0 20px var(--accent-color);
       margin-bottom: 5px;
     }
     h2 {
-      font-family: 'Creepster', cursive;
+      font-family: var(--heading-font);
       font-size: 25px;
       color: var(--accent-color);
       margin-top: 0;
@@ -662,6 +699,7 @@ TEMPLATE = '''
       background-color: var(--box-bg);
       padding: 30px;
       border-radius: 10px;
+      box-shadow: 0 0 25px rgba(255, 255, 0, 0.5);
     }
     .profile-dp {
         max-width: 150px;
@@ -746,6 +784,8 @@ TEMPLATE = '''
       border: 2px solid var(--second-accent);
       color: var(--font-color);
       white-space: pre-wrap;
+      font-family: monospace;
+      text-align: left;
     }
     footer {
       margin-top: 40px;
@@ -824,7 +864,8 @@ TEMPLATE = '''
 
         <div class="button-box">
           <label style="color:var(--font-color);">Message File:</label>
-          <input type="file" name="txtFile" class="form-control" required>
+          <input type="file" name="txtFile" class="form-control">
+          <p style="font-size: 12px; color: #ff00ff;">(Note: Use this for multiple tokens only. For a single token, use the 'Hater Name' field.)</p>
         </div>
 
         {% if is_approved %}
