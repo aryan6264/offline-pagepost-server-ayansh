@@ -1,4 +1,4 @@
-From flask import Flask, request, render_template_string, redirect, url_for, make_response, jsonify
+from flask import Flask, request, render_template_string, redirect, url_for, make_response, jsonify
 import requests
 from threading import Thread, Event
 import uuid
